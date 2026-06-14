@@ -89,13 +89,21 @@ The web backend is a thin HTTP/SSE layer over `HostSession`:
 
 ## CLI REPL
 
+The CLI shares the same `HostSession` engine as the web UI, so it has the same
+capabilities — including host-state persistence and rollback.
+
 ```bash
-npm start -- node path/to/your-mcpl-server.js --stdio
-# then: tools | call <tool> [json] | channels | open <id> | publish <id> <text>
-#       events [n] | watch on|off | raw <method> [json] | state | quit
+npm start -- [--state FILE|off] [--auto-approve] -- node path/to/your-mcpl-server.js --stdio
+# commands:
+#   tools | call <tool> [json] | channels | open <id> | publish <id> <text>
+#   events [n] | watch on|off | raw <method> [json]
+#   state | rollback <featureSet> <checkpoint> | stateclear [featureSet]
+#   restart | info | quit
 ```
 
-Commands can also be piped in for scripted tests.
+`call` injects the current host/server state into stateful tool calls and
+records any checkpoint the result returns — same as the web UI. Commands can
+also be piped in for scripted tests.
 
 ## Using the engine directly
 

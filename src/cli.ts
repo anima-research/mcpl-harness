@@ -3,12 +3,15 @@
  * mcpl-harness — a stateful CLI MCPL *host* for testing MCPL servers.
  *
  * Spawns an MCPL server over stdio, performs the host handshake (advertising
- * MCPL support), then maintains live state — tool list, registered channels,
- * and a push-event log — while accepting commands on stdin. Interactive (a
- * REPL) and scriptable (pipe commands in).
+ * MCPL support), then maintains live state — tools, channels, a push-event log,
+ * and host-managed state (Section 8) — while accepting commands on stdin.
+ * Interactive (a REPL) and scriptable (pipe commands in).
+ *
+ * The CLI and the web UI (`web.ts`) share one engine — `HostSession` — so both
+ * get the same behavior, including host-state persistence and rollback.
  *
  * Usage:
- *   mcpl-harness -- <command> [args...]
+ *   mcpl-harness [--state FILE|off] [--auto-approve] -- <command> [args...]
  *   mcpl-harness -- node path/to/your-mcpl-server.js --stdio
  *   # servers that need credentials take them from the environment:
  *   SOME_TOKEN=… mcpl-harness -- node path/to/your-mcpl-server.js
@@ -16,150 +19,89 @@
  * Commands (stdin, one per line):
  *   help                         show commands
  *   tools                        list tools
- *   call <tool> [json-args]      tools/call
+ *   call <tool> [json-args]      tools/call (injects host state for stateful sets)
  *   channels                     list registered channels
  *   open <mcplChannelId>         channels/open (by descriptor id)
  *   publish <mcplChannelId> <text…>   channels/publish
- *   events [n]                   show last n push events (default 10)
- *   watch on|off                 live-print push events as they arrive (default on)
+ *   events [n]                   show last n events (default 10)
+ *   watch on|off                 live-print server→host events (default on)
  *   raw <method> [json]          send an arbitrary request
- *   state                        summary
+ *   state                        show host-managed state per feature set
+ *   rollback <featureSet> <checkpoint>   roll a feature set back to a checkpoint
+ *   stateclear [featureSet]      clear stored checkpoints (all, or one set)
+ *   restart                      respawn the server process and re-handshake
+ *   info                         one-line summary
  *   quit | exit
  */
-import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { randomUUID } from 'node:crypto';
-import { McplConnection } from '@connectome/mcpl-core';
-
-interface ToolDef {
-  name: string;
-  description?: string;
-}
-interface ChannelDesc {
-  id: string;
-  label?: string;
-  type?: string;
-  address?: unknown;
-}
+import { join } from 'node:path';
+import { HostSession } from './session.js';
 
 const argv = process.argv.slice(2);
 const dashdash = argv.indexOf('--');
 if (dashdash < 0 || dashdash === argv.length - 1) {
-  console.error('usage: mcpl-harness -- <command> [args...]');
+  console.error('usage: mcpl-harness [--state FILE|off] [--auto-approve] -- <command> [args...]');
   process.exit(1);
 }
+const flags = argv.slice(0, dashdash);
+const stateFlag = flags.indexOf('--state');
+const statePath =
+  stateFlag >= 0
+    ? flags[stateFlag + 1] === 'off' ? null : flags[stateFlag + 1]
+    : join(process.cwd(), '.mcpl-harness-state.json');
+const autoApprove = flags.includes('--auto-approve');
 const [cmd, ...cmdArgs] = argv.slice(dashdash + 1);
 
-// ── State ──
-const state = {
-  tools: [] as ToolDef[],
-  channels: new Map<string, ChannelDesc>(),
-  events: [] as Array<{ at: string; channelId?: string; text: string; raw: unknown }>,
-  watch: true,
-};
+let watch = true;
+const session = new HostSession({ command: cmd, args: cmdArgs, autoApprove, statePath });
 
-const child = spawn(cmd, cmdArgs, { stdio: ['pipe', 'pipe', 'inherit'], env: process.env });
-child.on('exit', (code) => {
+session.on('exit', (code) => {
   console.error(`\n[harness] server exited (${code}); bye`);
   process.exit(code ?? 0);
 });
 
-const conn = McplConnection.fromStreams(child.stdout!, child.stdin!);
+// Live-print server-initiated events (and checkpoint records) while watch is on.
+session.on('event', (ev) => {
+  if (!watch) return;
+  const interesting =
+    (ev.dir === 'in' && (ev.kind === 'push' || ev.kind === 'channel')) ||
+    (ev.kind === 'system' && /checkpoint recorded|host decision/.test(ev.summary));
+  if (interesting) process.stdout.write(`\n« ${ev.summary}\n> `);
+});
 
-function logEvent(channelId: string | undefined, text: string, raw: unknown): void {
-  state.events.push({ at: new Date().toISOString(), channelId, text, raw });
-  if (state.events.length > 500) state.events.shift();
-  if (state.watch) process.stdout.write(`\n« push ${channelId ?? ''} ${text}\n> `);
+function pj(v: unknown): string {
+  return JSON.stringify(v, null, 2);
 }
 
-function textOf(payload: unknown): string {
-  const content = (payload as { content?: Array<{ type: string; text?: string }> })?.content ?? [];
-  return content
-    .map((b) => (b.type === 'text' ? b.text : `[${b.type}]`))
-    .filter(Boolean)
-    .join(' ');
-}
-
-// ── Host: handle server → host messages ──
-async function pump(): Promise<void> {
-  while (!conn.isClosed) {
-    const msg = await conn.nextMessage();
-    if (msg.type === 'request') {
-      const { id, method, params } = msg.request;
-      switch (method) {
-        case 'push/event': {
-          const p = params as { origin?: { channelId?: string }; payload?: unknown };
-          logEvent(p.origin?.channelId, textOf(p.payload), params);
-          conn.sendResponse(id, {});
-          break;
-        }
-        case 'channels/incoming': {
-          logEvent(undefined, `[channels/incoming] ${JSON.stringify(params)}`, params);
-          conn.sendResponse(id, {});
-          break;
-        }
-        case 'scope/elevate':
-          conn.sendResponse(id, { approved: true });
-          break;
-        case 'state/update': {
-          const p = params as { checkpoint?: string };
-          conn.sendResponse(id, { checkpoint: p.checkpoint ?? '', success: true });
-          break;
-        }
-        default:
-          conn.sendError(id, -32601, `harness: unhandled request ${method}`);
-      }
-    } else {
-      const { method, params } = msg.notification;
-      if (method === 'channels/changed') {
-        const p = params as { added?: ChannelDesc[]; removed?: string[] };
-        for (const d of p.added ?? []) state.channels.set(d.id, d);
-        for (const id of p.removed ?? []) state.channels.delete(id);
-        if (state.watch) process.stdout.write(`\n« channels/changed (+${p.added?.length ?? 0}/-${p.removed?.length ?? 0})\n> `);
-      }
-    }
+function printState(): void {
+  const v = session.snapshot().hostState;
+  if (!v.featureSets.length) return void console.log('  no stateful feature sets');
+  for (const fs of v.featureSets) {
+    const mode = fs.hostState ? 'host-managed' : 'server-managed';
+    console.log(`  ${fs.featureSet} [${mode}]  head=${fs.current ?? '—'}  (${fs.checkpoints.length} checkpoint${fs.checkpoints.length === 1 ? '' : 's'})`);
+    if (fs.hostState) console.log(`    data: ${JSON.stringify(fs.data)}`);
+    if (fs.checkpoints.length) console.log(`    checkpoints: ${fs.checkpoints.map((c) => c.checkpoint).join(', ')}`);
   }
+  if (v.path) console.log(`  (persisted to ${v.path})`);
 }
 
-async function handshake(): Promise<void> {
-  const result = (await conn.sendRequest('initialize', {
-    protocolVersion: '2024-11-05',
-    capabilities: { experimental: { mcpl: { version: '0.4', pushEvents: true, channels: true } } },
-    clientInfo: { name: 'mcpl-harness', version: '0.1.0' },
-  })) as { serverInfo?: { name?: string }; capabilities?: unknown };
-  conn.sendNotification('notifications/initialized', {});
-  console.error(`[harness] connected to ${result.serverInfo?.name ?? 'server'}`);
-  await refreshTools();
-  await refreshChannels();
-}
-
-async function refreshTools(): Promise<void> {
-  const r = (await conn.sendRequest('tools/list', {})) as { tools?: ToolDef[] };
-  state.tools = r.tools ?? [];
-}
-async function refreshChannels(): Promise<void> {
-  try {
-    const r = (await conn.sendRequest('channels/list', {})) as { channels?: ChannelDesc[] };
-    for (const d of r.channels ?? []) state.channels.set(d.id, d);
-  } catch {
-    /* server may not support channels/list */
-  }
-}
-
-// ── REPL ──
 function help(): void {
   console.log(
     [
       'commands:',
       '  tools                       list tools',
-      '  call <tool> [json]          call a tool',
+      '  call <tool> [json]          call a tool (injects host state)',
       '  channels                    list channels',
       '  open <mcplChannelId>        channels/open',
       '  publish <chanId> <text…>    channels/publish',
-      '  events [n]                  last n push events',
+      '  events [n]                  last n events',
       '  watch on|off                live event printing',
       '  raw <method> [json]         arbitrary request',
-      '  state                       summary',
+      '  state                       host-managed state per feature set',
+      '  rollback <fs> <checkpoint>  roll a feature set back to a checkpoint',
+      '  stateclear [fs]             clear stored checkpoints (all, or one set)',
+      '  restart                     respawn server + re-handshake',
+      '  info                        one-line summary',
       '  quit|exit',
     ].join('\n'),
   );
@@ -167,7 +109,7 @@ function help(): void {
 
 async function handle(line: string): Promise<void> {
   const trimmed = line.trim();
-  if (!trimmed) return;
+  if (!trimmed || trimmed.startsWith('#')) return;
   const sp = trimmed.indexOf(' ');
   const verb = (sp < 0 ? trimmed : trimmed.slice(0, sp)).toLowerCase();
   const rest = sp < 0 ? '' : trimmed.slice(sp + 1).trim();
@@ -178,67 +120,82 @@ async function handle(line: string): Promise<void> {
         help();
         break;
       case 'tools':
-        for (const t of state.tools) console.log(`  ${t.name}${t.description ? ' — ' + t.description.split('\n')[0] : ''}`);
+        for (const t of session.snapshot().tools)
+          console.log(`  ${t.name}${t.description ? ' — ' + t.description.split('\n')[0] : ''}`);
         break;
       case 'call': {
         const s2 = rest.indexOf(' ');
         const tool = s2 < 0 ? rest : rest.slice(0, s2);
         const args = s2 < 0 ? {} : JSON.parse(rest.slice(s2 + 1));
-        const res = await conn.sendRequest('tools/call', { name: tool, arguments: args });
-        console.log(JSON.stringify(res, null, 2));
+        console.log(pj(await session.callTool(tool, args)));
         break;
       }
       case 'channels':
-        for (const c of state.channels.values()) console.log(`  ${c.id}  ${c.label ?? ''}`);
+        for (const c of session.snapshot().channels) console.log(`  ${c.id}  ${c.label ?? ''}`);
         break;
-      case 'open': {
-        const desc = state.channels.get(rest);
-        if (!desc) return void console.log('unknown channel id (see `channels`)');
-        const res = await conn.sendRequest('channels/open', { type: desc.type, address: desc.address });
-        console.log(JSON.stringify(res, null, 2));
+      case 'open':
+        console.log(pj(await session.openChannel(rest)));
         break;
-      }
       case 'publish': {
         const s2 = rest.indexOf(' ');
         const chan = s2 < 0 ? rest : rest.slice(0, s2);
         const text = s2 < 0 ? '' : rest.slice(s2 + 1);
-        const res = await conn.sendRequest('channels/publish', {
-          conversationId: `harness_${randomUUID()}`,
-          channelId: chan,
-          content: [{ type: 'text', text }],
-        });
-        console.log(JSON.stringify(res, null, 2));
+        console.log(pj(await session.publish(chan, text)));
         break;
       }
       case 'events': {
         const n = rest ? parseInt(rest, 10) : 10;
-        for (const e of state.events.slice(-n)) console.log(`  ${e.at} [${e.channelId ?? ''}] ${e.text}`);
+        for (const e of session.snapshot().events.slice(-n))
+          console.log(`  ${e.at} ${e.dir === 'in' ? '←' : e.dir === 'out' ? '→' : '·'} [${e.kind}] ${e.summary}`);
         break;
       }
       case 'watch':
-        state.watch = rest !== 'off';
-        console.log(`watch ${state.watch ? 'on' : 'off'}`);
+        watch = rest !== 'off';
+        console.log(`watch ${watch ? 'on' : 'off'}`);
         break;
       case 'raw': {
         const s2 = rest.indexOf(' ');
         const m = s2 < 0 ? rest : rest.slice(0, s2);
         const p = s2 < 0 ? {} : JSON.parse(rest.slice(s2 + 1));
-        console.log(JSON.stringify(await conn.sendRequest(m, p), null, 2));
-        break;
-      }
-      case 'wait': {
-        const ms = parseInt(rest, 10) || 1000;
-        await new Promise((r) => setTimeout(r, ms));
-        await refreshChannels();
+        console.log(pj(await session.raw(m, p)));
         break;
       }
       case 'state':
-        console.log(`tools: ${state.tools.length}, channels: ${state.channels.size}, events: ${state.events.length}, watch: ${state.watch}`);
+        printState();
         break;
+      case 'rollback': {
+        const s2 = rest.indexOf(' ');
+        if (s2 < 0) return void console.log('usage: rollback <featureSet> <checkpoint>');
+        const fs = rest.slice(0, s2);
+        const checkpoint = rest.slice(s2 + 1).trim();
+        console.log(pj(await session.rollbackState(fs, checkpoint)));
+        printState();
+        break;
+      }
+      case 'stateclear':
+        session.clearState(rest || undefined);
+        printState();
+        break;
+      case 'restart':
+        await session.restart();
+        break;
+      case 'wait': {
+        const ms = parseInt(rest, 10) || 1000;
+        await new Promise((r) => setTimeout(r, ms));
+        await session.refreshChannels();
+        break;
+      }
+      case 'info': {
+        const s = session.snapshot();
+        console.log(
+          `server: ${s.serverInfo?.name ?? '?'} | tools: ${s.tools.length} | channels: ${s.channels.length} | ` +
+            `stateful: ${s.hostState.featureSets.length} | events: ${s.events.length} | watch: ${watch} | connected: ${s.connected}`,
+        );
+        break;
+      }
       case 'quit':
       case 'exit':
-        conn.close();
-        child.kill();
+        session.close();
         process.exit(0);
         break;
       default:
@@ -250,8 +207,9 @@ async function handle(line: string): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  void pump().catch((e) => console.error('[harness] pump error:', (e as Error).message));
-  await handshake();
+  await session.start();
+  const s = session.snapshot();
+  console.error(`[harness] connected to ${s.serverInfo?.name ?? 'server'} — ${s.tools.length} tools, ${s.hostState.featureSets.length} stateful feature set(s)`);
   help();
   const rl = createInterface({ input: process.stdin, output: process.stdout, prompt: '> ' });
   rl.prompt();
@@ -265,8 +223,7 @@ async function main(): Promise<void> {
   // before tearing down — otherwise close races ahead of the chain.
   rl.on('close', () => {
     chain.then(() => {
-      conn.close();
-      child.kill();
+      session.close();
       process.exit(0);
     });
   });
