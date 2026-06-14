@@ -21,14 +21,13 @@ npm run build
 
 ```bash
 # from source (tsx, no build step)
-npm run web -- --open -- node ../heartbeat-mcpl/dist/src/index.js --stdio
+npm run web -- --open -- node path/to/your-mcpl-server.js --stdio
 
 # or built
 node dist/src/web.js --port 7333 --open -- <server-command> [args...]
 
-# servers that need env (e.g. portal-mcpl):
-PORTAL_TOKEN=… PORTAL_PERSONA=mythos \
-  node dist/src/web.js -- node ../portal-mcpl/dist/src/server-cli.js
+# servers that need credentials take them from the environment:
+SOME_TOKEN=… node dist/src/web.js -- node path/to/your-mcpl-server.js --stdio
 ```
 
 Flags (before `--`): `--port N` (default 7333), `--host H` (default `127.0.0.1`;
@@ -70,8 +69,8 @@ The harness is a real state-persisting host, not a stub:
   **⟳ restart** button and a full harness relaunch. `state/rollback` (from the
   UI) reverts both the local store and the server.
 
-This makes host-state paths — e.g. x-mcpl's `x.notifications` read/unread
-cursors (`hostState: true`) — testable end-to-end.
+This makes host-state paths — any feature set declaring `hostState: true`
+(e.g. server-side cursors persisted by the host) — testable end-to-end.
 
 ### HTTP API (for scripting the host)
 
@@ -91,7 +90,7 @@ The web backend is a thin HTTP/SSE layer over `HostSession`:
 ## CLI REPL
 
 ```bash
-npm start -- node ../heartbeat-mcpl/dist/src/index.js --stdio
+npm start -- node path/to/your-mcpl-server.js --stdio
 # then: tools | call <tool> [json] | channels | open <id> | publish <id> <text>
 #       events [n] | watch on|off | raw <method> [json] | state | quit
 ```

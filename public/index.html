@@ -477,7 +477,7 @@ function esc(s) {
 
 // ── Readable serializer ──
 // Unlike JSON.stringify, this renders multi-line strings with real line breaks
-// and recursively expands strings that are themselves JSON (the x.read tools
+// and recursively expands strings that are themselves JSON (servers commonly
 // return JSON-encoded text inside content blocks — double-escaped otherwise).
 const IDENT = /^[A-Za-z_$][\w$]*$/;
 function pretty(v, ind = 0) {

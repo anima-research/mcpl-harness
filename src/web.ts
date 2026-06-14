@@ -16,8 +16,9 @@
  *
  * Usage:
  *   mcpl-harness-web [--port 7333] [--open] -- <command> [args...]
- *   PORTAL_TOKEN=… PORTAL_PERSONA=mythos \
- *     mcpl-harness-web -- node ../portal-mcpl/dist/src/server-cli.js
+ *   mcpl-harness-web -- node path/to/your-mcpl-server.js --stdio
+ *   # servers that need credentials take them from the environment:
+ *   SOME_TOKEN=… mcpl-harness-web -- node path/to/your-mcpl-server.js
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { readFile } from 'node:fs/promises';

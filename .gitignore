@@ -5,5 +5,4 @@ dist/
 
 # runtime host-state artifacts (per-session)
 .mcpl-harness-state.json
-.xgate-state.json
 *-state.json

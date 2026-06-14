@@ -9,8 +9,9 @@
  *
  * Usage:
  *   mcpl-harness -- <command> [args...]
- *   PORTAL_TOKEN=… PORTAL_PERSONA=mythos \
- *     mcpl-harness -- node ../portal-mcpl/dist/src/server-cli.js
+ *   mcpl-harness -- node path/to/your-mcpl-server.js --stdio
+ *   # servers that need credentials take them from the environment:
+ *   SOME_TOKEN=… mcpl-harness -- node path/to/your-mcpl-server.js
  *
  * Commands (stdin, one per line):
  *   help                         show commands
