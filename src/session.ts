@@ -31,6 +31,9 @@ export interface ToolDef {
   name: string;
   description?: string;
   inputSchema?: unknown;
+  /** Optional owning feature set — lets the host attribute state per tool. */
+  featureSet?: string;
+  _meta?: { featureSet?: string };
 }
 
 export interface ChannelDesc {
@@ -140,6 +143,10 @@ export class HostSession extends (EventEmitter as new () => TypedEmitter) {
   private serverInfo: { name?: string; version?: string } | null = null;
   private serverCapabilities: unknown = null;
   private tools: ToolDef[] = [];
+  /** tool name → owning feature set, when the server tags tools. */
+  private toolFeatureSet = new Map<string, string>();
+  /** tools we've already warned about being un-attributable, to avoid log spam. */
+  private ambiguityWarned = new Set<string>();
   private channels = new Map<string, ChannelDesc>();
   private featureSets: Record<string, unknown> = {};
   private events: SessionEvent[] = [];
@@ -276,30 +283,84 @@ export class HostSession extends (EventEmitter as new () => TypedEmitter) {
 
   async callTool(name: string, args: unknown = {}): Promise<unknown> {
     const params: Record<string, unknown> = { name, arguments: args };
-    // Inject host/server state for the (first) stateful feature set, mirroring
-    // a real host: hostState → `state`, server-managed → `checkpoint`.
-    const fs = this.store.firstStateful();
-    if (fs) {
-      const inj = this.store.injectionFor(fs);
+
+    // Inject host/server state for the feature set this tool belongs to.
+    // We attribute by an explicit signal only — never guess. A tool's owning
+    // set is known if the server tagged it; otherwise it's unambiguous only
+    // when there's exactly one stateful set. (State can also change without a
+    // tool call: the authoritative channel is `state/update`, which carries an
+    // explicit featureSet — see handleServerRequest.)
+    const injectFs = this.resolveStatefulSet(name);
+    if (injectFs) {
+      const inj = this.store.injectionFor(injectFs);
       if (inj?.state !== undefined) params.state = inj.state;
       if (inj?.checkpoint !== undefined) params.checkpoint = inj.checkpoint;
     }
+
     this.log('out', 'tool', `call ${name}`, 'tools/call', params);
     const res = await this.conn.sendRequest('tools/call', params);
     this.log('in', 'response', `result ${name}`, 'tools/call', res);
-    // Record any checkpoint the server returned in the result.
+
+    // Record a checkpoint the result carried — attributed by explicit featureSet
+    // first, then the tool's resolved set, narrowing by management mode. Never
+    // misattribute: drop with a warning if the owning set can't be determined.
     const cp = (res as { state?: StateCheckpoint })?.state;
-    if (fs && cp && typeof cp === 'object' && 'checkpoint' in cp) {
-      this.store.recordCheckpoint(fs, cp);
-      this.emit('state', 'hostState');
-      this.log('system', 'system', `checkpoint recorded ${fs}@${cp.checkpoint}`, undefined, cp);
+    if (cp && typeof cp === 'object' && 'checkpoint' in cp) {
+      const mode: 'host' | 'server' = cp.data !== undefined || cp.patch !== undefined ? 'host' : 'server';
+      const target = this.attributeCheckpoint(name, cp, mode);
+      if (target) {
+        if (!this.store.isStateful(target)) {
+          this.store.registerFeatureSet(target, { hostState: mode === 'host', rollback: mode === 'server' });
+        }
+        this.store.recordCheckpoint(target, cp);
+        this.emit('state', 'hostState');
+        this.log('system', 'system', `checkpoint recorded ${target}@${cp.checkpoint}`, undefined, cp);
+      } else {
+        this.log('system', 'error',
+          `state: tool '${name}' returned a checkpoint but no owning feature set could be determined ` +
+          `(${this.store.statefulSets(mode).length} candidate ${mode}-managed sets, none declared). Dropped, not guessed. ` +
+          `Fix: tag the tool with featureSet, or put featureSet on result.state, or push via state/update.`,
+          undefined, cp);
+      }
     }
     return res;
+  }
+
+  /** Which stateful set to inject for a tool call — explicit signal only, else null. */
+  private resolveStatefulSet(toolName: string): string | null {
+    const mapped = this.toolFeatureSet.get(toolName);
+    if (mapped && this.store.isStateful(mapped)) return mapped;
+    const sets = this.store.statefulSets();
+    if (sets.length === 1) return sets[0]!; // unambiguous
+    if (sets.length > 1 && !this.ambiguityWarned.has(toolName)) {
+      this.ambiguityWarned.add(toolName);
+      this.log('system', 'error',
+        `state: can't attribute tool '${toolName}' to a feature set (${sets.length} stateful sets, ` +
+        `none declared on the tool) — not injecting state. Server should tag tools with featureSet.`);
+    }
+    return null;
+  }
+
+  /** Which set a returned checkpoint belongs to — explicit featureSet, else resolved set, narrowed by mode. */
+  private attributeCheckpoint(toolName: string, cp: StateCheckpoint, mode: 'host' | 'server'): string | null {
+    if (typeof cp.featureSet === 'string') return cp.featureSet; // explicit wins (auto-registers if new)
+    const mapped = this.toolFeatureSet.get(toolName);
+    if (mapped && this.store.isStateful(mapped)) return mapped;
+    const candidates = this.store.statefulSets(mode);
+    return candidates.length === 1 ? candidates[0]! : null; // never guess among many
   }
 
   async refreshTools(): Promise<ToolDef[]> {
     const r = (await this.conn.sendRequest('tools/list', {})) as { tools?: ToolDef[] };
     this.tools = r.tools ?? [];
+    // Build the tool→featureSet map from whatever the server tags (a top-level
+    // `featureSet` or `_meta.featureSet`). Absent any tag, attribution falls back
+    // to the single-stateful-set case in resolveStatefulSet/attributeCheckpoint.
+    this.toolFeatureSet.clear();
+    for (const t of this.tools) {
+      const fs = t.featureSet ?? t._meta?.featureSet;
+      if (typeof fs === 'string') this.toolFeatureSet.set(t.name, fs);
+    }
     this.emit('state', 'tools');
     return this.tools;
   }

@@ -65,6 +65,7 @@ session.on('event', (ev) => {
   if (!watch) return;
   const interesting =
     (ev.dir === 'in' && (ev.kind === 'push' || ev.kind === 'channel')) ||
+    ev.kind === 'error' ||
     (ev.kind === 'system' && /checkpoint recorded|host decision/.test(ev.summary));
   if (interesting) process.stdout.write(`\n« ${ev.summary}\n> `);
 });

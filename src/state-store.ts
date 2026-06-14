@@ -114,6 +114,8 @@ export interface StateCheckpoint {
   parent?: string | null;
   data?: unknown;
   patch?: JsonPatchOperation[];
+  /** Explicit owning feature set, when the server tags it. Removes ambiguity. */
+  featureSet?: string;
 }
 
 interface CheckpointNode {
@@ -200,10 +202,18 @@ export class StateStore {
     return this.trees.get(featureSet)?.hostState ?? false;
   }
 
-  /** First stateful feature set, for injecting state into tool calls. */
-  firstStateful(): string | null {
-    for (const [fs] of this.trees) return fs;
-    return null;
+  /**
+   * Stateful feature sets, optionally narrowed by management mode.
+   * `host` = hostState:true, `server` = server-managed (rollback only).
+   */
+  statefulSets(mode?: 'host' | 'server'): string[] {
+    const out: string[] = [];
+    for (const [fs, t] of this.trees) {
+      if (mode === 'host' && !t.hostState) continue;
+      if (mode === 'server' && t.hostState) continue;
+      out.push(fs);
+    }
+    return out;
   }
 
   /** What to inject into a tools/call for the given (stateful) feature set. */
