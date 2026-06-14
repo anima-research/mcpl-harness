@@ -1,0 +1,33 @@
+{
+  "name": "@connectome/mcpl-harness",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/src/cli.js",
+  "bin": {
+    "mcpl-harness": "./dist/src/cli.js",
+    "mcpl-harness-web": "./dist/src/web.js"
+  },
+  "files": [
+    "dist",
+    "public"
+  ],
+  "description": "Stateful MCPL host harness — spawn any MCPL server, drive tool calls, watch push events. CLI REPL and browser UI for testing MCPL servers without a full agent host.",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "start": "node --import tsx src/cli.ts",
+    "web": "node --import tsx src/web.ts",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@connectome/mcpl-core": "file:../mcpl-core-ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.7.0",
+    "typescript": "^5.5.0",
+    "@types/node": "^20.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

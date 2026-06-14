@@ -1,0 +1,555 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MCPL Harness — Host UI</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --panel2: #1d2129; --border: #2a2f3a;
+    --text: #d7dce4; --muted: #8a92a3; --accent: #6ea8fe; --green: #5ad19a;
+    --red: #f0746a; --yellow: #e6c860; --purple: #b48ef0;
+    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+         background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; gap: 14px; padding: 8px 14px;
+           background: var(--panel); border-bottom: 1px solid var(--border); flex: none; }
+  header h1 { font-size: 14px; margin: 0; font-weight: 600; }
+  header .cmd { font-family: var(--mono); color: var(--muted); font-size: 11px;
+                overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40vw; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; background: var(--muted); }
+  .dot.on { background: var(--green); } .dot.off { background: var(--red); }
+  header .spacer { flex: 1; }
+  label.toggle { display: flex; align-items: center; gap: 6px; color: var(--muted); cursor: pointer; }
+  main { flex: 1; display: grid; grid-template-columns: 260px 1fr 1.1fr; min-height: 0; }
+  .col { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--border); }
+  .col:last-child { border-right: none; }
+  .col h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+            margin: 0; padding: 9px 12px; border-bottom: 1px solid var(--border);
+            display: flex; align-items: center; gap: 8px; flex: none; }
+  .col h2 .count { background: var(--panel2); border-radius: 10px; padding: 0 7px; font-size: 10px; }
+  .col h2 button { margin-left: auto; }
+  .scroll { overflow-y: auto; flex: 1; min-height: 0; }
+  button { background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+           border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 12px; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #07101f; border-color: var(--accent); font-weight: 600; }
+  button.sm { padding: 2px 7px; font-size: 11px; }
+  input, textarea, select { background: var(--bg); color: var(--text); border: 1px solid var(--border);
+           border-radius: 6px; padding: 6px 8px; font: inherit; width: 100%; }
+  textarea { font-family: var(--mono); font-size: 12px; resize: vertical; }
+
+  /* Tools / channels list */
+  .item { padding: 8px 12px; border-bottom: 1px solid var(--border); cursor: pointer; }
+  .item:hover { background: var(--panel); }
+  .item.active { background: var(--panel2); box-shadow: inset 2px 0 0 var(--accent); }
+  .item .name { font-family: var(--mono); font-size: 12px; color: var(--text); }
+  .item .desc { color: var(--muted); font-size: 11px; margin-top: 2px;
+                display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .item .row { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+  .empty { color: var(--muted); padding: 16px 12px; font-style: italic; }
+
+  /* Host state */
+  .state-tag { font-family: var(--mono); font-size: 9px; padding: 0 5px; border-radius: 3px;
+               background: var(--panel2); color: var(--purple); margin-left: 4px; }
+  .state-tag.srv { color: var(--accent); }
+  #hoststate .item pre.result { margin: 6px 0 0; font-size: 11px; max-height: 30vh; }
+  .cp { display: inline-block; font-family: var(--mono); font-size: 10px; padding: 1px 6px;
+        margin: 2px 2px 0 0; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; color: var(--muted); }
+  .cp:hover { border-color: var(--accent); color: var(--text); }
+  .cp.cur { border-color: var(--green); color: var(--green); }
+
+  /* Center: caller */
+  .pad { padding: 12px; overflow-y: auto; }
+  .field { margin-bottom: 10px; }
+  .field label { display: block; color: var(--muted); font-size: 11px; margin-bottom: 3px; }
+  .field .hint { color: var(--muted); font-size: 10px; margin-top: 2px; }
+  .field .type { font-family: var(--mono); color: var(--purple); font-size: 10px; }
+  .caller-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .caller-head .name { font-family: var(--mono); font-size: 14px; font-weight: 600; }
+  .caller-actions { display: flex; gap: 8px; margin: 10px 0; }
+  pre.result { background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+               padding: 10px; overflow: auto; font-family: var(--mono); font-size: 12px;
+               white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40vh; }
+  .result.err { border-color: var(--red); color: var(--red); }
+
+  /* Pending requests */
+  #pending { flex: none; }
+  .pend { background: rgba(230,200,96,.08); border: 1px solid var(--yellow); border-radius: 8px;
+          margin: 8px 12px; padding: 10px; }
+  .pend .ttl { color: var(--yellow); font-weight: 600; font-family: var(--mono); }
+  .pend pre { margin: 6px 0; font-size: 11px; max-height: 120px;
+              white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--mono); }
+
+  /* Events */
+  .filters { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 12px; border-bottom: 1px solid var(--border); }
+  .filters button { font-size: 10px; padding: 1px 7px; opacity: .5; }
+  .filters button.on { opacity: 1; }
+  .ev { padding: 6px 12px; border-bottom: 1px solid var(--border); cursor: pointer; font-size: 12px; }
+  .ev:hover { background: var(--panel); }
+  .ev .meta { display: flex; gap: 8px; align-items: baseline; }
+  .ev .time { color: var(--muted); font-family: var(--mono); font-size: 10px; }
+  .ev .badge { font-family: var(--mono); font-size: 10px; padding: 0 6px; border-radius: 4px; background: var(--panel2); }
+  .ev .summary { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ev.dir-in .badge { color: var(--green); } .ev.dir-out .badge { color: var(--accent); }
+  .ev.dir-system .badge { color: var(--muted); }
+  .ev.kind-push .summary { color: var(--purple); }
+  .ev.kind-error .summary { color: var(--red); }
+  .ev.pending .summary { color: var(--yellow); }
+  .ev pre { display: none; margin: 6px 0 0; font-size: 11px; font-family: var(--mono);
+            white-space: pre-wrap; overflow-wrap: anywhere; }
+  .ev.open pre { display: block; }
+  .ev.open .summary { white-space: normal; }
+</style>
+</head>
+<body>
+<header>
+  <h1>MCPL Harness</h1>
+  <span class="dot" id="status-dot"></span>
+  <span id="server-name" class="muted">connecting…</span>
+  <span class="cmd" id="cmd"></span>
+  <span class="spacer"></span>
+  <label class="toggle"><input type="checkbox" id="autoapprove" /> auto-approve</label>
+  <button class="sm" id="restart" title="Kill and respawn the server process, then re-handshake">⟳ restart</button>
+  <button class="sm" id="clear-log">clear log</button>
+</header>
+
+<main>
+  <!-- Tools + Channels -->
+  <div class="col">
+    <h2>Tools <span class="count" id="tool-count">0</span>
+        <button class="sm" id="refresh-tools">↻</button></h2>
+    <div class="scroll" id="tools"></div>
+    <h2>Channels <span class="count" id="chan-count">0</span>
+        <button class="sm" id="refresh-chans">↻</button></h2>
+    <div class="scroll" id="channels" style="flex:.5"></div>
+    <h2>Host State <span class="count" id="state-count">0</span>
+        <button class="sm" id="clear-state" title="Clear all stored checkpoints">clear</button></h2>
+    <div class="scroll" id="hoststate" style="flex:.8"></div>
+  </div>
+
+  <!-- Caller -->
+  <div class="col">
+    <h2>Call</h2>
+    <div class="pad" id="caller">
+      <div class="empty">Select a tool, or use the raw request console below.</div>
+    </div>
+    <h2>Raw request</h2>
+    <div class="pad" style="flex:none">
+      <div class="field"><label>method</label><input id="raw-method" placeholder="e.g. channels/list" /></div>
+      <div class="field"><label>params (JSON)</label><textarea id="raw-params" rows="3">{}</textarea></div>
+      <div class="caller-actions">
+        <button class="primary" id="raw-send">Send request</button>
+        <button id="raw-notify">Send notification</button>
+      </div>
+      <pre class="result" id="raw-result" style="display:none"></pre>
+    </div>
+  </div>
+
+  <!-- Events -->
+  <div class="col">
+    <div id="pending"></div>
+    <h2>Event log <span class="count" id="ev-count">0</span></h2>
+    <div class="filters" id="filters"></div>
+    <div class="scroll" id="events"></div>
+  </div>
+</main>
+
+<script>
+const KINDS = ['push','channel','tool','request','response','system','error'];
+const state = { snapshot: null, selectedTool: null, filters: new Set(KINDS), seen: new Set() };
+
+// ── API ──
+async function cmd(op, extra = {}) {
+  const r = await fetch('/api/command', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ op, ...extra }),
+  });
+  return r.json();
+}
+
+// ── SSE ──
+function connect() {
+  const es = new EventSource('/api/events');
+  es.addEventListener('snapshot', (e) => { state.snapshot = JSON.parse(e.data); renderAll(); });
+  es.addEventListener('state', (e) => { state.snapshot = JSON.parse(e.data).snapshot; renderAll(); });
+  es.addEventListener('event', (e) => addEvent(JSON.parse(e.data)));
+  es.addEventListener('exit', (e) => { setStatus(false); });
+  es.onerror = () => setStatus(false);
+}
+
+// ── Rendering ──
+const $ = (id) => document.getElementById(id);
+
+function setStatus(on) {
+  const dot = $('status-dot');
+  dot.className = 'dot ' + (on ? 'on' : 'off');
+}
+
+function renderAll() {
+  const s = state.snapshot; if (!s) return;
+  setStatus(s.connected);
+  $('server-name').textContent = (s.serverInfo && s.serverInfo.name) || 'server';
+  $('cmd').textContent = s.command || '';
+  $('autoapprove').checked = !!s.autoApprove;
+  renderTools(); renderChannels(); renderPending(); renderState();
+  // hydrate event log from snapshot (first load)
+  if (state.seen.size === 0 && s.events) {
+    $('events').innerHTML = '';
+    s.events.forEach(addEvent);
+  }
+}
+
+function renderTools() {
+  const s = state.snapshot;
+  const el = $('tools'); el.innerHTML = '';
+  $('tool-count').textContent = s.tools.length;
+  if (!s.tools.length) { el.innerHTML = '<div class="empty">no tools</div>'; return; }
+  for (const t of s.tools) {
+    const d = document.createElement('div');
+    d.className = 'item' + (state.selectedTool === t.name ? ' active' : '');
+    d.innerHTML = `<div class="name">${esc(t.name)}</div>` +
+      (t.description ? `<div class="desc">${esc(t.description)}</div>` : '');
+    d.onclick = () => { state.selectedTool = t.name; renderTools(); renderCaller(t); };
+    el.appendChild(d);
+  }
+}
+
+function renderChannels() {
+  const s = state.snapshot;
+  const el = $('channels'); el.innerHTML = '';
+  $('chan-count').textContent = s.channels.length;
+  if (!s.channels.length) { el.innerHTML = '<div class="empty">no channels</div>'; return; }
+  for (const c of s.channels) {
+    const d = document.createElement('div');
+    d.className = 'item';
+    d.innerHTML = `<div class="name">${esc(c.label || c.id)}</div>` +
+      `<div class="desc">${esc(c.id)}${c.direction ? ' · ' + c.direction : ''}</div>` +
+      `<div class="row"><button class="sm" data-open>open</button><button class="sm" data-pub>publish…</button></div>`;
+    d.querySelector('[data-open]').onclick = async () => {
+      const r = await cmd('openChannel', { channelId: c.id });
+      flash(r.ok ? 'opened' : ('error: ' + r.error));
+    };
+    d.querySelector('[data-pub]').onclick = async () => {
+      const text = prompt('Publish to ' + (c.label || c.id) + ':');
+      if (text == null) return;
+      const r = await cmd('publish', { channelId: c.id, text });
+      flash(r.ok ? 'published' : ('error: ' + r.error));
+    };
+    el.appendChild(d);
+  }
+}
+
+// ── Host-managed state ──
+function shortCp(id) { return id && id.length > 16 ? id.slice(0, 14) + '…' : (id || '—'); }
+function renderState() {
+  const s = state.snapshot;
+  const view = s.hostState || { featureSets: [] };
+  const el = $('hoststate'); el.innerHTML = '';
+  $('state-count').textContent = view.featureSets.length;
+  if (!view.featureSets.length) {
+    el.innerHTML = '<div class="empty">no stateful feature sets</div>';
+    return;
+  }
+  for (const fs of view.featureSets) {
+    const d = document.createElement('div');
+    d.className = 'item';
+    const tag = fs.hostState
+      ? '<span class="state-tag">host-managed</span>'
+      : '<span class="state-tag srv">server-managed</span>';
+    d.style.cursor = 'default';
+    d.innerHTML =
+      `<div class="name">${esc(fs.featureSet)}${tag}</div>` +
+      `<div class="desc">head: ${esc(shortCp(fs.current))} · ${fs.checkpoints.length} checkpoint${fs.checkpoints.length === 1 ? '' : 's'}</div>`;
+    if (fs.hostState) {
+      const pre = document.createElement('pre');
+      pre.className = 'result';
+      pre.textContent = pretty(fs.data);
+      d.appendChild(pre);
+    }
+    if (fs.checkpoints.length) {
+      const chips = document.createElement('div');
+      chips.className = 'row';
+      chips.title = 'click a checkpoint to roll back to it';
+      for (const cp of fs.checkpoints) {
+        const b = document.createElement('span');
+        b.className = 'cp' + (cp.checkpoint === fs.current ? ' cur' : '');
+        b.textContent = shortCp(cp.checkpoint);
+        b.title = `${cp.checkpoint}\n${cp.at}${cp.hasData ? ' · full data' : cp.hasPatch ? ' · patch' : ''}`;
+        b.onclick = async () => {
+          if (cp.checkpoint === fs.current) return;
+          if (!confirm(`Roll back ${fs.featureSet} to ${cp.checkpoint}?`)) return;
+          const r = await cmd('stateRollback', { featureSet: fs.featureSet, checkpoint: cp.checkpoint });
+          if (!r.ok) flash('rollback failed: ' + r.error);
+        };
+        chips.appendChild(b);
+      }
+      d.appendChild(chips);
+    }
+    el.appendChild(d);
+  }
+}
+
+// ── Tool caller with schema-driven form ──
+function renderCaller(tool) {
+  const el = $('caller'); el.innerHTML = '';
+  const head = document.createElement('div');
+  head.className = 'caller-head';
+  head.innerHTML = `<span class="name">${esc(tool.name)}</span>
+    <label class="toggle" style="margin-left:auto"><input type="checkbox" id="rawmode"/> raw JSON</label>`;
+  el.appendChild(head);
+  if (tool.description) {
+    const dsc = document.createElement('div');
+    dsc.className = 'field hint'; dsc.style.color = 'var(--muted)';
+    dsc.textContent = tool.description;
+    el.appendChild(dsc);
+  }
+
+  const props = (tool.inputSchema && tool.inputSchema.properties) || {};
+  const required = (tool.inputSchema && tool.inputSchema.required) || [];
+  const formWrap = document.createElement('div');
+  const rawWrap = document.createElement('div');
+  rawWrap.style.display = 'none';
+  rawWrap.innerHTML = `<div class="field"><label>arguments (JSON)</label>
+    <textarea id="rawargs" rows="6">${esc(JSON.stringify(skeleton(props), null, 2))}</textarea></div>`;
+
+  if (Object.keys(props).length === 0) {
+    formWrap.innerHTML = '<div class="field hint">no parameters</div>';
+  }
+  for (const [key, sc] of Object.entries(props)) {
+    const f = document.createElement('div'); f.className = 'field';
+    const req = required.includes(key) ? ' *' : '';
+    const typ = sc.type || (sc.enum ? 'enum' : 'any');
+    let control;
+    if (sc.enum) {
+      control = `<select data-key="${esc(key)}"><option value=""></option>` +
+        sc.enum.map((v) => `<option>${esc(String(v))}</option>`).join('') + `</select>`;
+    } else if (sc.type === 'boolean') {
+      control = `<select data-key="${esc(key)}" data-bool><option value=""></option><option>true</option><option>false</option></select>`;
+    } else if (sc.type === 'number' || sc.type === 'integer') {
+      control = `<input type="number" data-key="${esc(key)}" data-num />`;
+    } else if (sc.type === 'object' || sc.type === 'array') {
+      control = `<textarea data-key="${esc(key)}" data-json rows="2" placeholder="${esc(sc.type)} as JSON"></textarea>`;
+    } else {
+      control = `<input type="text" data-key="${esc(key)}" />`;
+    }
+    f.innerHTML = `<label>${esc(key)}${req} <span class="type">${esc(typ)}</span></label>${control}` +
+      (sc.description ? `<div class="hint">${esc(sc.description)}</div>` : '');
+    formWrap.appendChild(f);
+  }
+  el.appendChild(formWrap); el.appendChild(rawWrap);
+
+  const actions = document.createElement('div');
+  actions.className = 'caller-actions';
+  actions.innerHTML = `<button class="primary" id="call-btn">Call ${esc(tool.name)}</button>`;
+  el.appendChild(actions);
+  const result = document.createElement('pre');
+  result.className = 'result'; result.id = 'call-result'; result.style.display = 'none';
+  el.appendChild(result);
+
+  $('rawmode').onchange = (e) => {
+    const raw = e.target.checked;
+    rawWrap.style.display = raw ? '' : 'none';
+    formWrap.style.display = raw ? 'none' : '';
+  };
+
+  $('call-btn').onclick = async () => {
+    let args;
+    try {
+      args = $('rawmode').checked ? JSON.parse($('rawargs').value || '{}') : collectForm(formWrap);
+    } catch (err) { return showResult(result, 'invalid JSON: ' + err.message, true); }
+    showResult(result, '…calling', false);
+    const r = await cmd('callTool', { name: tool.name, arguments: args });
+    if (r.ok) showResult(result, pretty(r.result), false);
+    else showResult(result, 'error: ' + r.error, true);
+  };
+}
+
+function collectForm(wrap) {
+  const out = {};
+  for (const ctl of wrap.querySelectorAll('[data-key]')) {
+    const k = ctl.getAttribute('data-key');
+    let v = ctl.value;
+    if (v === '' || v == null) continue;
+    if (ctl.hasAttribute('data-num')) v = Number(v);
+    else if (ctl.hasAttribute('data-bool')) v = v === 'true';
+    else if (ctl.hasAttribute('data-json')) v = JSON.parse(v);
+    out[k] = v;
+  }
+  return out;
+}
+
+function skeleton(props) {
+  const o = {};
+  for (const [k, sc] of Object.entries(props)) {
+    o[k] = sc.type === 'number' || sc.type === 'integer' ? 0
+         : sc.type === 'boolean' ? false
+         : sc.type === 'array' ? [] : sc.type === 'object' ? {} : '';
+  }
+  return o;
+}
+
+function showResult(el, text, err) {
+  el.style.display = ''; el.textContent = text;
+  el.className = 'result' + (err ? ' err' : '');
+}
+
+// ── Pending interactive requests ──
+function renderPending() {
+  const s = state.snapshot;
+  const el = $('pending'); el.innerHTML = '';
+  for (const p of s.pending || []) {
+    const d = document.createElement('div'); d.className = 'pend';
+    const isInfer = p.method === 'inference/request';
+    d.innerHTML = `<div class="ttl">⟶ ${esc(p.method)}</div>
+      <pre class="result">${esc(pretty(p.params))}</pre>`;
+    if (isInfer) {
+      const ta = document.createElement('textarea');
+      ta.rows = 3; ta.placeholder = 'your response as the model…';
+      d.appendChild(ta);
+      const send = document.createElement('div'); send.className = 'caller-actions';
+      send.innerHTML = `<button class="primary">Respond</button><button>Default</button>`;
+      send.children[0].onclick = () => cmd('resolvePending', { pendingId: p.pendingId, result: {
+        content: ta.value, model: 'harness/human', finishReason: 'stop',
+        usage: { inputTokens: 0, outputTokens: 0 } } });
+      send.children[1].onclick = () => cmd('resolvePending', { pendingId: p.pendingId, result: {
+        content: '(default)', model: 'harness/human', finishReason: 'stop',
+        usage: { inputTokens: 0, outputTokens: 0 } } });
+      d.appendChild(send);
+    } else {
+      const send = document.createElement('div'); send.className = 'caller-actions';
+      send.innerHTML = `<button class="primary">Approve</button><button>Deny</button>`;
+      send.children[0].onclick = () => cmd('resolvePending', { pendingId: p.pendingId, result: { approved: true } });
+      send.children[1].onclick = () => cmd('rejectPending', { pendingId: p.pendingId, message: 'denied by host' });
+      d.appendChild(send);
+    }
+    el.appendChild(d);
+  }
+}
+
+// ── Event log ──
+function renderFilters() {
+  const el = $('filters'); el.innerHTML = '';
+  for (const k of KINDS) {
+    const b = document.createElement('button');
+    b.textContent = k; b.className = state.filters.has(k) ? 'on' : '';
+    b.onclick = () => {
+      if (state.filters.has(k)) state.filters.delete(k); else state.filters.add(k);
+      b.className = state.filters.has(k) ? 'on' : '';
+      for (const ev of $('events').children) {
+        ev.style.display = state.filters.has(ev.dataset.kind) ? '' : 'none';
+      }
+    };
+    el.appendChild(b);
+  }
+}
+
+function addEvent(ev) {
+  if (state.seen.has(ev.seq)) return;
+  state.seen.add(ev.seq);
+  const box = $('events');
+  const d = document.createElement('div');
+  d.className = `ev dir-${ev.dir} kind-${ev.kind}` + (ev.pendingId ? ' pending' : '');
+  d.dataset.kind = ev.kind;
+  d.style.display = state.filters.has(ev.kind) ? '' : 'none';
+  const t = ev.at.slice(11, 19);
+  d.innerHTML = `<div class="meta">
+      <span class="time">${t}</span>
+      <span class="badge">${esc(ev.dir === 'out' ? '→' : ev.dir === 'in' ? '←' : '·')} ${esc(ev.kind)}</span>
+      <span class="summary">${esc(ev.summary)}</span>
+    </div><pre>${esc(pretty(ev.data))}</pre>`;
+  d.onclick = () => d.classList.toggle('open');
+  box.appendChild(d);
+  $('ev-count').textContent = box.children.length;
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
+  if (atBottom) box.scrollTop = box.scrollHeight;
+}
+
+function flash(msg) {
+  const r = $('raw-result'); r.style.display = ''; r.textContent = msg; r.className = 'result';
+}
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+// ── Readable serializer ──
+// Unlike JSON.stringify, this renders multi-line strings with real line breaks
+// and recursively expands strings that are themselves JSON (the x.read tools
+// return JSON-encoded text inside content blocks — double-escaped otherwise).
+const IDENT = /^[A-Za-z_$][\w$]*$/;
+function pretty(v, ind = 0) {
+  const pad = '  '.repeat(ind), padIn = '  '.repeat(ind + 1);
+  if (v === null) return 'null';
+  if (v === undefined) return 'undefined';
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+  if (typeof v === 'string') return prettyStr(v, ind);
+  if (Array.isArray(v)) {
+    if (!v.length) return '[]';
+    return '[\n' + v.map((x) => padIn + pretty(x, ind + 1)).join(',\n') + '\n' + pad + ']';
+  }
+  if (typeof v === 'object') {
+    const keys = Object.keys(v);
+    if (!keys.length) return '{}';
+    return '{\n' + keys.map((k) => {
+      const key = IDENT.test(k) ? k : JSON.stringify(k);
+      return padIn + key + ': ' + pretty(v[k], ind + 1);
+    }).join(',\n') + '\n' + pad + '}';
+  }
+  return String(v);
+}
+function prettyStr(s, ind) {
+  const t = s.trim();
+  // Embedded JSON object/array → expand it inline.
+  if (t.length > 1 && ((t[0] === '{' && t.endsWith('}')) || (t[0] === '[' && t.endsWith(']')))) {
+    try {
+      const parsed = JSON.parse(t);
+      if (parsed && typeof parsed === 'object') return pretty(parsed, ind);
+    } catch { /* not JSON, fall through */ }
+  }
+  // Multi-line string → keep quotes but use real newlines, indenting continuations.
+  if (s.includes('\n')) {
+    const padIn = '  '.repeat(ind + 1);
+    return '"' + s.replace(/\n/g, '\n' + padIn) + '"';
+  }
+  return JSON.stringify(s);
+}
+
+// ── Wire up static controls ──
+$('autoapprove').onchange = (e) => cmd('autoApprove', { on: e.target.checked });
+$('refresh-tools').onclick = () => cmd('refreshTools');
+$('refresh-chans').onclick = () => cmd('refreshChannels');
+$('clear-log').onclick = () => { $('events').innerHTML = ''; state.seen.clear(); $('ev-count').textContent = 0; };
+$('clear-state').onclick = async () => {
+  if (!confirm('Clear all stored host-state checkpoints?')) return;
+  await cmd('stateClear');
+};
+$('restart').onclick = async () => {
+  const btn = $('restart');
+  btn.disabled = true; btn.textContent = '⟳ restarting…'; setStatus(false);
+  state.selectedTool = null;
+  $('caller').innerHTML = '<div class="empty">Select a tool, or use the raw request console below.</div>';
+  const r = await cmd('restart');
+  btn.disabled = false; btn.textContent = '⟳ restart';
+  if (!r.ok) flash('restart failed: ' + r.error);
+};
+$('raw-send').onclick = async () => {
+  let params; try { params = JSON.parse($('raw-params').value || '{}'); }
+  catch (e) { return flash('invalid JSON: ' + e.message); }
+  const r = await cmd('raw', { method: $('raw-method').value, params });
+  flash(r.ok ? pretty(r.result) : 'error: ' + r.error);
+};
+$('raw-notify').onclick = async () => {
+  let params; try { params = JSON.parse($('raw-params').value || '{}'); }
+  catch (e) { return flash('invalid JSON: ' + e.message); }
+  const r = await cmd('notify', { method: $('raw-method').value, params });
+  flash(r.ok ? 'notification sent' : 'error: ' + r.error);
+};
+
+renderFilters();
+connect();
+</script>
+</body>
+</html>
