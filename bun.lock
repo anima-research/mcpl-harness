@@ -1,0 +1,34 @@
+{
+  "lockfileVersion": 1,
+  "configVersion": 0,
+  "workspaces": {
+    "": {
+      "name": "@connectome/mcpl-harness",
+      "dependencies": {
+        "@animalabs/mcpl-core": "file:../mcpl-core-ts",
+      },
+      "devDependencies": {
+        "@types/node": "^20.0.0",
+        "tsx": "^4.7.0",
+        "typescript": "^5.5.0",
+      },
+    },
+  },
+  "packages": {
+    "@animalabs/mcpl-core": ["@animalabs/mcpl-core@file:../mcpl-core-ts", { "devDependencies": { "@types/node": "^20.0.0", "tsx": "^4.7.0", "typescript": "^5.5.0" } }],
+
+    "@esbuild/darwin-arm64": ["@esbuild/darwin-arm64@0.28.1", "", { "os": "darwin", "cpu": "arm64" }, ""],
+
+    "@types/node": ["@types/node@20.19.43", "", { "dependencies": { "undici-types": "~6.21.0" } }, ""],
+
+    "esbuild": ["esbuild@0.28.1", "", { "optionalDependencies": { "@esbuild/darwin-arm64": "0.28.1" }, "bin": "bin/esbuild" }, ""],
+
+    "fsevents": ["fsevents@2.3.3", "", { "os": "darwin" }, ""],
+
+    "tsx": ["tsx@4.22.4", "", { "dependencies": { "esbuild": "~0.28.0" }, "optionalDependencies": { "fsevents": "~2.3.3" }, "bin": "dist/cli.mjs" }, ""],
+
+    "typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, ""],
+
+    "undici-types": ["undici-types@6.21.0", "", {}, ""],
+  }
+}

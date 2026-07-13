@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "serverName": "x-mcpl",
+  "featureSets": {
+    "x.post": {
+      "hostState": false,
+      "rollback": true,
+      "current": "1",
+      "nodes": {
+        "1": {
+          "parent": null,
+          "children": [],
+          "data": {
+            "version": 1,
+            "seq": 1,
+            "sources": [
+              {
+                "id": "timeline:repligate",
+                "kind": "timeline",
+                "value": "repligate"
+              }
+            ],
+            "cursors": {}
+          },
+          "at": "2026-06-14T18:08:27.756Z"
+        }
+      }
+    },
+    "x.notifications": {
+      "hostState": true,
+      "rollback": false,
+      "current": null,
+      "nodes": {}
+    },
+    "x.dm": {
+      "hostState": false,
+      "rollback": true,
+      "current": null,
+      "nodes": {}
+    },
+    "x.feed": {
+      "hostState": true,
+      "rollback": true,
+      "current": null,
+      "nodes": {}
+    }
+  }
+}

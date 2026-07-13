@@ -22,7 +22,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import { McplConnection, ConnectionClosedError } from '@connectome/mcpl-core';
+import { McplConnection, ConnectionClosedError } from '@animalabs/mcpl-core';
 import { StateStore, type StateView, type StateCheckpoint } from './state-store.js';
 
 // ── Public shapes ──

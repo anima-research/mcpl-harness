@@ -1,5 +1,5 @@
 {
-  "name": "@connectome/mcpl-harness",
+  "name": "@animalabs/mcpl-harness",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/src/cli.js",
@@ -20,7 +20,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@connectome/mcpl-core": "file:../mcpl-core-ts"
+    "@animalabs/mcpl-core": "file:../mcpl-core-ts"
   },
   "devDependencies": {
     "tsx": "^4.7.0",
