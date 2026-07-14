@@ -1,11 +1,11 @@
 {
   "name": "@animalabs/mcpl-harness",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "main": "./dist/src/cli.js",
   "bin": {
-    "mcpl-harness": "./dist/src/cli.js",
-    "mcpl-harness-web": "./dist/src/web.js"
+    "mcpl-harness": "dist/src/cli.js",
+    "mcpl-harness-web": "dist/src/web.js"
   },
   "files": [
     "dist",
