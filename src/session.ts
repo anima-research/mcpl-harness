@@ -489,18 +489,37 @@ export class HostSession extends (EventEmitter as new () => TypedEmitter) {
     await this.refreshChannels();
   }
 
-  /** Register stateful feature sets (rollback or hostState) declared in initialize capabilities. */
+  /** Register stateful feature sets declared in initialize capabilities.
+   *
+   *  Accepts BOTH wire shapes (issue #4): the conforming 0.5 form — an
+   *  OBJECT keyed by feature-set name (SPEC §6.1/§5.1, App. B.2, no `name`
+   *  member) — and the legacy 0.4 array of {name, …}. The old code
+   *  hardcoded the array and threw `(decls ?? []) is not iterable` on the
+   *  spec shape, making the harness the one consumer that crashed on a
+   *  conforming manifest — it forced heartbeat-mcpl to ship the deprecated
+   *  form under protest. `hostState` was removed in 0.5 (§8); it is still
+   *  READ here for legacy 0.4 servers but never required. */
   private registerDeclaredFeatureSets(capabilities: unknown): void {
-    const decls = (capabilities as {
-      experimental?: { mcpl?: { featureSets?: Array<{ name: string; rollback?: boolean; hostState?: boolean }> } };
+    const raw = (capabilities as {
+      experimental?: { mcpl?: { featureSets?: unknown } };
     })?.experimental?.mcpl?.featureSets;
-    for (const fs of decls ?? []) {
+
+    type Decl = { name: string; rollback?: boolean; hostState?: boolean };
+    let decls: Decl[] = [];
+    if (Array.isArray(raw)) {
+      decls = (raw as Decl[]).filter((d) => d && typeof d.name === 'string');
+    } else if (raw && typeof raw === 'object') {
+      decls = Object.entries(raw as Record<string, Omit<Decl, 'name'>>)
+        .map(([name, d]) => ({ name, ...(d ?? {}) }));
+    }
+
+    for (const fs of decls) {
       this.featureSets[fs.name] = fs;
       if (fs.rollback || fs.hostState) {
         this.store.registerFeatureSet(fs.name, { hostState: !!fs.hostState, rollback: !!fs.rollback });
       }
     }
-    if (decls?.length) {
+    if (decls.length) {
       this.emit('state', 'featureSets');
       this.emit('state', 'hostState');
     }
